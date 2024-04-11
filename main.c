@@ -17,7 +17,7 @@ pcap_t *handle;
 void main_loop(u_char *user, const struct pcap_pkthdr *h, const u_char *bytes);
 void cleanup();
 void stop(int signum);
-
+// https://stackoverflow.com/questions/8203419/processing-incorrect-mac-addresses-from-802-11-frames-with-pcap
 typedef struct frame_control
 {
   uint8_t version : 2;
@@ -74,24 +74,39 @@ frame_control parse_frame_control(const uint8_t *frame_control_byte)
   return fc;
 }
 
+
+typedef struct ieee80211_radiotap_header{
+        u_int8_t        it_version;     /* set to 0 */
+        u_int8_t        it_pad;
+        u_int16_t       it_len;         /* entire length */
+        u_int32_t       it_present;     /* fields present */
+} radiotap_header;
+
 #define MAC2STR(a) (a)[0], (a)[1], (a)[2], (a)[3], (a)[4], (a)[5]
 #define MACSTR "%02x:%02x:%02x:%02x:%02x:%02x"
 
 void main_loop(u_char *user, const struct pcap_pkthdr *h, const u_char *bytes)
 {
-  const uint8_t *frame_control_byte = bytes;
+  radiotap_header *rdiohdr;
+  rdiohdr = (radiotap_header *) (bytes);
+
+  const uint8_t *frame_control_byte = bytes + rdiohdr->it_len;
   frame_control fc = parse_frame_control(frame_control_byte);
 
-  const uint8_t *mac_header_bytes = bytes;
-  mac_header hdr = parse_mac_header(mac_header_bytes);
+  // const uint8_t *mac_header_bytes = bytes;
+  mac_header hdr = parse_mac_header(frame_control_byte);
 
+  // uint8_t* address1;
+  // address1 = (uint8_t *) (bytes + 4);
   // Print the MAC addresses
 
   // Print the parsed frame control fields
+  // printf("Header: %d %d pad: %d len: %d", h->len, h->caplen, rdiohdr->it_pad, rdiohdr->it_len);
+
   printf("Version: %u, Type: %u, Subtype: %u\n", fc.version, fc.type, fc.subtype);
-  printf("To DS: %u, From DS: %u, More Frag: %u\n", fc.to_ds, fc.from_ds, fc.more_frag);
-  printf("Retry: %u, Power Management: %u, More Data: %u\n", fc.retry, fc.pwr_mgt, fc.more_data);
-  printf("WEP: %u, Order: %u\n", fc.wep, fc.order);
+  // printf("To DS: %u, From DS: %u, More Frag: %u\n", fc.to_ds, fc.from_ds, fc.more_frag);
+  // printf("Retry: %u, Power Management: %u, More Data: %u\n", fc.retry, fc.pwr_mgt, fc.more_data);
+  // printf("WEP: %u, Order: %u\n", fc.wep, fc.order);
 
   printf("Destination MAC: %02X:%02X:%02X:%02X:%02X:%02X\n", hdr.address1[0], hdr.address1[1], hdr.address1[2], hdr.address1[3], hdr.address1[4], hdr.address1[5]);
   printf("Source MAC: %02X:%02X:%02X:%02X:%02X:%02X\n", hdr.address2[0], hdr.address2[1], hdr.address2[2], hdr.address2[3], hdr.address2[4], hdr.address2[5]);
@@ -122,6 +137,10 @@ int main(int argc, char *argv[])
     return 1;
   }
 
+
+  bpf_u_int32 netp, maskp;
+  struct bpf_program fp;
+
   char *interface = argv[1];
 
   errbuf = malloc(PCAP_ERRBUF_SIZE);
@@ -133,11 +152,18 @@ int main(int argc, char *argv[])
   //   exit(EXIT_FAILURE);
   // }
 
-  // if (pcap_set_rfmon(handle, 1) != 0)
-  // {
-  //   printf("Failed to set monitor mode.\n");
-  //   exit(EXIT_FAILURE);
-  // }
+  if (pcap_set_promisc(handle, 1) != 0)
+  {
+    printf("Failed to set monitor mode.\n");
+    exit(EXIT_FAILURE);
+  }
+
+
+  if (pcap_set_rfmon(handle, 1) != 0)
+  {
+    printf("Failed to set monitor mode.\n");
+    exit(EXIT_FAILURE);
+  }
 
   pcap_set_snaplen(handle, 65535);
   pcap_set_timeout(handle, 1000);
@@ -147,6 +173,20 @@ int main(int argc, char *argv[])
     printf("pcap_activate() failed\n");
     exit(EXIT_FAILURE);
   }
+
+  pcap_lookupnet(interface, &netp, &maskp, errbuf);
+  pcap_compile(handle, &fp, "type data subtype data", 0, maskp);
+
+  if (pcap_setfilter(handle, &fp) < 0) {
+    pcap_perror(handle, "pcap_setfilter()");
+    exit(EXIT_FAILURE);
+  }
+
+  if( pcap_datalink(handle) != DLT_IEEE802_11_RADIO) {
+    printf("Wrong datalink type\n");
+    exit(EXIT_FAILURE);
+  }
+  // printf("\nTYPE: %d\n", pcap_datalink(handle));
 
   // pcap_set_rfmon(handle, 1);
 
