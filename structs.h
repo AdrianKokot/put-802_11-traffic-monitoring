@@ -63,7 +63,7 @@ typedef struct centry
 
 typedef struct com_ap_data
 {
-  centry *entries;
+  centry **entries;
   int size;
   int cap;
   uint8_t bssid[6];
@@ -103,7 +103,7 @@ void com_ap_data_add_entry(com_ap_data *data, uint8_t *addr_1, uint8_t *addr_2, 
     data->entries = realloc(data->entries, (data->cap) * sizeof(centry));
   }
 
-  centry *entry = &data->entries[data->size];
+  centry *entry = data->entries[data->size];
   memcpy(entry->addr_1, addr_1, 6);
   memcpy(entry->addr_2, addr_2, 6);
   entry->ttl = ttl;
@@ -140,7 +140,7 @@ void remove_old_entries(com_ap_data *data)
 {
   for (int j = 0; j < data->size; j++)
   {
-    if (data->entries[j].ttl <= 0)
+    if (data->entries[j]->ttl <= 0)
     {
       for (int k = j; k < data->size - 1; k++)
       {

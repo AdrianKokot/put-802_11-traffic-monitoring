@@ -37,10 +37,8 @@ int main(int argc, char *argv[])
   bpf_u_int32 netp, maskp;
   struct bpf_program fp;
 
-  char *interface = argv[1];
-
   errbuf = malloc(PCAP_ERRBUF_SIZE);
-  handle = pcap_create(interface, errbuf);
+  handle = pcap_create(argv[1], errbuf);
 
   if (pcap_set_promisc(handle, 1) != 0)
   {
@@ -63,7 +61,7 @@ int main(int argc, char *argv[])
     exit(EXIT_FAILURE);
   }
 
-  pcap_lookupnet(interface, &netp, &maskp, errbuf);
+  pcap_lookupnet(argv[1], &netp, &maskp, errbuf);
   pcap_compile(handle, &fp, "type mgt subtype beacon || type data subtype data", 0, maskp);
 
   if (pcap_setfilter(handle, &fp) < 0)
@@ -102,11 +100,9 @@ void cleanup()
     for (int i = 0; i < ap_list->size; i++)
     {
       free(ap_list->data[i]);
-      ap_list->data[i] = NULL;
     }
 
     free(ap_list);
-    ap_list = NULL;
   }
 }
 
@@ -117,14 +113,13 @@ void stop(int signum)
 
 void main_loop(u_char *user, const struct pcap_pkthdr *h, const u_char *bytes)
 {
-  radiotap_header *rdiohdr;
-  rdiohdr = (radiotap_header *)(bytes);
+  radiotap_header *rdiohdr = (radiotap_header *)(bytes);
 
   const uint8_t *frame_control_byte = bytes + rdiohdr->it_len;
   frame_control *fc = (frame_control *)(frame_control_byte);
+  mac_header *hdr = (mac_header *)(frame_control_byte);
 
   uint8_t *source_address, *destination_address, *bssid;
-  mac_header *hdr = (mac_header *)(frame_control_byte);
 
   if (fc->to_ds == 0)
   {
@@ -215,7 +210,7 @@ void main_loop(u_char *user, const struct pcap_pkthdr *h, const u_char *bytes)
 
   for (int i = 0; i < current_ap->size; i++)
   {
-    centry *entry = &current_ap->entries[i];
+    centry *entry = current_ap->entries[i];
     if ((mac_equal(entry->addr_1, source_address) && mac_equal(entry->addr_2, destination_address)) || (mac_equal(entry->addr_2, source_address) && mac_equal(entry->addr_1, destination_address)))
     {
       entry->ttl = START_TTL;
@@ -233,13 +228,11 @@ void main_loop(u_char *user, const struct pcap_pkthdr *h, const u_char *bytes)
 
   for (int i = 0; i < ap_list->size; i++)
   {
-    com_ap_data *data = ap_list->data[i];
-    printf("BSSID: " GREEN MACSTR RESET " SSID: " BLUE "%s" RESET "\n", MAC2STR(data->bssid), data->ssid);
-    for (int j = 0; j < data->size; j++)
+    printf("BSSID: " GREEN MACSTR RESET " SSID: " YELLOW "%s" RESET "\n", MAC2STR(ap_list->data[i]->bssid), ap_list->data[i]->ssid);
+    for (int j = 0; j < ap_list->data[i]->size; j++)
     {
-      centry *entry = &data->entries[j];
-      printf("\t%d. "GREEN MACSTR YELLOW" <-> "GREEN MACSTR RESET"\n", j + 1, MAC2STR(entry->addr_1), MAC2STR(entry->addr_2));
-      entry->ttl--;
+      printf("\t%d. "GREEN MACSTR RESET" <-> "GREEN MACSTR RESET"\n", j + 1, MAC2STR(ap_list->data[i]->entries[j]->addr_1), MAC2STR(ap_list->data[i]->entries[j]->addr_2));
+      ap_list->data[i]->entries[j]->ttl--;
     }
 
     remove_old_entries(ap_list->data[i]);
