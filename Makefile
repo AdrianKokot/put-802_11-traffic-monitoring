@@ -1,5 +1,5 @@
 all:
-	gcc -Wall ./main.c -o ./main.o -lpcap
+	gcc -Wall -I . ./main.c -o ./main.o -lpcap
 
 clean:
 	rm -f ./main
