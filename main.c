@@ -21,12 +21,13 @@ com_ap_data_list *ap_list = NULL;
 
 void main_loop(u_char *user, const struct pcap_pkthdr *h, const u_char *bytes);
 void cleanup();
+void stop();
+void print_network(); 
 
 int main(int argc, char *argv[])
 {
   atexit(cleanup);
-  signal(SIGINT, cleanup);
-  signal(SIGTERM, cleanup);
+  signal(SIGINT, stop);
 
   if (argc != 2)
   {
@@ -48,7 +49,7 @@ int main(int argc, char *argv[])
 
   if (pcap_set_promisc(handle, 1) != 0)
   {
-    printf("Failed to set monitor mode.\n");
+    printf("Failed to set promiscous mode.\n");
     exit(EXIT_FAILURE);
   }
 
@@ -67,14 +68,14 @@ int main(int argc, char *argv[])
     exit(EXIT_FAILURE);
   }
 
-  pcap_lookupnet(argv[1], &netp, &maskp, errbuf);
-  pcap_compile(handle, &fp, "type mgt subtype beacon || type data subtype data", 0, maskp);
+  //pcap_lookupnet(argv[1], &netp, &maskp, errbuf);
+  //pcap_compile(handle, &fp, "type mgt subtype beacon || type data", 0, maskp);
 
-  if (pcap_setfilter(handle, &fp) < 0)
-  {
-    pcap_perror(handle, "pcap_setfilter()");
-    exit(EXIT_FAILURE);
-  }
+  //if (pcap_setfilter(handle, &fp) < 0)
+  //{
+  //  pcap_perror(handle, "pcap_setfilter()");
+  //  exit(EXIT_FAILURE);
+  //}
 
   if (pcap_datalink(handle) != DLT_IEEE802_11_RADIO)
   {
@@ -89,19 +90,20 @@ int main(int argc, char *argv[])
   return EXIT_SUCCESS;
 }
 
+void stop() {
+  exit(EXIT_SUCCESS);
+}
 void cleanup()
 {
-  if (handle)
-  {
-    pcap_close(handle);
-  }
-
-  if (errbuf)
+ pcap_set_rfmon(handle, 0);
+pcap_set_promisc(handle, 0);
+  
+if (errbuf != NULL)
   {
     free(errbuf);
   }
 
-  if (ap_list)
+  if (ap_list != NULL)
   {
     for (int i = 0; i < ap_list->size; i++)
     {
@@ -114,6 +116,7 @@ void cleanup()
 
 void main_loop(u_char *user, const struct pcap_pkthdr *h, const u_char *bytes)
 {
+  
   radiotap_header *rdiohdr = (radiotap_header *)(bytes);
 
   const uint8_t *frame_control_byte = bytes + rdiohdr->it_len;
@@ -122,6 +125,9 @@ void main_loop(u_char *user, const struct pcap_pkthdr *h, const u_char *bytes)
 
   uint8_t *source_address, *destination_address, *bssid;
 
+  printf("TO_DS: %d, FROM_DS: %d, TYPE: %02x SUBTYPE: %02x\n", fc->to_ds, fc->from_ds, fc->type, fc->subtype);
+  
+  if (!((fc->type == 0 && fc->subtype == 8) || fc->type == 2)){ return ;}
   if (fc->to_ds == 0)
   {
     destination_address = hdr->address1;
@@ -158,6 +164,7 @@ void main_loop(u_char *user, const struct pcap_pkthdr *h, const u_char *bytes)
     beacon_frame_body *beacon_frame = (beacon_frame_body *)(bytes + rdiohdr->it_len + sizeof(mac_header));
 
     char ssid[33];
+    ssid[0] = '\0';
     memcpy(ssid, beacon_frame->ssid.ssid, beacon_frame->ssid.length);
     ssid[beacon_frame->ssid.length] = '\0';
 
@@ -178,16 +185,20 @@ void main_loop(u_char *user, const struct pcap_pkthdr *h, const u_char *bytes)
       com_ap_data_list_add(ap_list, data);
     }
 
+    
+    print_network();
     return;
   }
 
-  if (!(fc->type == 0b10 && fc->subtype == 0b0000))
+  //if (!(fc->type == 0b10 && fc->subtype == 0b0000))
+  if (fc->type != 0b10)
   {
     return;
   }
 
   if (mac_is_broadcast(destination_address))
   {
+    printf("is broadcast!\n");
     return;
   }
 
@@ -204,6 +215,8 @@ void main_loop(u_char *user, const struct pcap_pkthdr *h, const u_char *bytes)
 
   if (current_ap == NULL)
   {
+    printf("no current ap\n");
+    print_network();
     return;
   }
 
@@ -222,10 +235,17 @@ void main_loop(u_char *user, const struct pcap_pkthdr *h, const u_char *bytes)
 
   if (!found)
   {
+	printf("Found!!!!!!\n");
     com_ap_data_add_entry(current_ap, source_address, destination_address, START_TTL);
   }
 
-  clear();
+  print_network();
+}
+
+void print_network() {
+  
+printf("============================\n\n\n");
+//clear();
 
   for (int i = 0; i < ap_list->size; i++)
   {
@@ -241,5 +261,6 @@ void main_loop(u_char *user, const struct pcap_pkthdr *h, const u_char *bytes)
     printf("\n");
   }
 
-  fflush(stdout);
+  // fflush(stdout);
 }
+
