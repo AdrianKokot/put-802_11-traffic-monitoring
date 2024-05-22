@@ -21,12 +21,12 @@ com_ap_data_list *ap_list = NULL;
 
 void main_loop(u_char *user, const struct pcap_pkthdr *h, const u_char *bytes);
 void cleanup();
-void stop(int signum);
 
 int main(int argc, char *argv[])
 {
   atexit(cleanup);
-  signal(SIGINT, stop);
+  signal(SIGINT, cleanup);
+  signal(SIGTERM, cleanup);
 
   if (argc != 2)
   {
@@ -39,6 +39,12 @@ int main(int argc, char *argv[])
 
   errbuf = malloc(PCAP_ERRBUF_SIZE);
   handle = pcap_create(argv[1], errbuf);
+
+  if (pcap_can_set_rfmon(handle) != 1)
+  {
+    printf("Hardware does not support monitor mode.\n");
+    exit(EXIT_FAILURE);
+  }
 
   if (pcap_set_promisc(handle, 1) != 0)
   {
@@ -80,22 +86,22 @@ int main(int argc, char *argv[])
   printf("Starting...\n");
   pcap_loop(handle, -1, main_loop, NULL);
 
-  return 0;
+  return EXIT_SUCCESS;
 }
 
 void cleanup()
 {
-  if (handle != NULL)
+  if (handle)
   {
     pcap_close(handle);
   }
 
-  if (errbuf != NULL)
+  if (errbuf)
   {
     free(errbuf);
   }
 
-  if (ap_list != NULL)
+  if (ap_list)
   {
     for (int i = 0; i < ap_list->size; i++)
     {
@@ -104,11 +110,6 @@ void cleanup()
 
     free(ap_list);
   }
-}
-
-void stop(int signum)
-{
-  exit(EXIT_SUCCESS);
 }
 
 void main_loop(u_char *user, const struct pcap_pkthdr *h, const u_char *bytes)
@@ -239,4 +240,6 @@ void main_loop(u_char *user, const struct pcap_pkthdr *h, const u_char *bytes)
 
     printf("\n");
   }
+
+  fflush(stdout);
 }
