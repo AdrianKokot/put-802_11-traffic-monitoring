@@ -1,7 +1,12 @@
 #ifndef _STRUCTS_H
 #define _STRUCTS_H
 
-// 802.11 related structs
+// 802.11 related structs and constants
+
+#define IEEE80211_TYPE_MGMT 0x0
+#define IEEE80211_TYPE_DATA 0x2
+
+#define IEEE80211_SUBTYPE_BEACON 0x8
 
 typedef struct ieee80211_radiotap_header
 {
@@ -51,8 +56,9 @@ typedef struct beacon_frame_body
   beacon_frame_body_ssid ssid;
 } beacon_frame_body;
 
-
 // Saving communication info structs
+
+#define DEFAULT_LIST_SIZE 1
 
 typedef struct centry
 {
@@ -85,28 +91,35 @@ com_ap_data *com_ap_data_new(uint8_t *bssid, char *ssid)
   com_ap_data *data = malloc(sizeof(com_ap_data));
   data->entries = NULL;
   data->size = 0;
+  list->cap = 0;
   memcpy(data->bssid, bssid, 6);
   strcpy(data->ssid, ssid);
   return data;
+}
+
+centry* com_ap_centry_new(uint8_t *addr_1, uint8_t *addr_2, int ttl)
+{
+  centry *entry = malloc(sizeof(centry));
+  memcpy(entry->addr_1, addr_1, 6);
+  memcpy(entry->addr_2, addr_2, 6);
+  entry->ttl = ttl;
+  return entry;
 }
 
 void com_ap_data_add_entry(com_ap_data *data, uint8_t *addr_1, uint8_t *addr_2, int ttl)
 {
   if (data->entries == NULL)
   {
-    data->entries = malloc(10 * sizeof(centry));
-    data->cap = 10;
+    data->entries = malloc(DEFAULT_LIST_SIZE * sizeof(centry *));
+    data->cap = DEFAULT_LIST_SIZE;
   }
   else if (data->size == data->cap)
   {
     data->cap *= 2;
-    data->entries = realloc(data->entries, (data->cap) * sizeof(centry));
+    data->entries = realloc(data->entries, (data->cap) * sizeof(centry *));
   }
 
-  centry *entry = data->entries[data->size];
-  memcpy(entry->addr_1, addr_1, 6);
-  memcpy(entry->addr_2, addr_2, 6);
-  entry->ttl = ttl;
+  data->entries[data->size] = com_ap_centry_new(addr_1, addr_2, ttl);
   data->size++;
 }
 
@@ -123,8 +136,8 @@ void com_ap_data_list_add(com_ap_data_list *list, com_ap_data *data)
 {
   if (list->data == NULL)
   {
-    list->data = malloc(10 * sizeof(com_ap_data *));
-    list->cap = 10;
+    list->data = malloc(DEFAULT_LIST_SIZE * sizeof(com_ap_data *));
+    list->cap = DEFAULT_LIST_SIZE;
   }
   else if (list->size == list->cap)
   {

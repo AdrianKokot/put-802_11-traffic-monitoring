@@ -15,18 +15,19 @@
 #include "hwutils.h"
 #include "printutils.h"
 
-char *errbuf = NULL;
+char errbuf = NULL;
 pcap_t *handle = NULL;
 com_ap_data_list *ap_list = NULL;
 
 void main_loop(u_char *user, const struct pcap_pkthdr *h, const u_char *bytes);
 void cleanup();
+void stop(int signum);
+void print_data();
 
 int main(int argc, char *argv[])
 {
   atexit(cleanup);
-  signal(SIGINT, cleanup);
-  signal(SIGTERM, cleanup);
+  signal(SIGINT, stop);
 
   if (argc != 2)
   {
@@ -40,15 +41,9 @@ int main(int argc, char *argv[])
   errbuf = malloc(PCAP_ERRBUF_SIZE);
   handle = pcap_create(argv[1], errbuf);
 
-  if (pcap_can_set_rfmon(handle) != 1)
-  {
-    printf("Hardware does not support monitor mode.\n");
-    exit(EXIT_FAILURE);
-  }
-
   if (pcap_set_promisc(handle, 1) != 0)
   {
-    printf("Failed to set monitor mode.\n");
+    printf("Failed to set promiscuous mode.\n");
     exit(EXIT_FAILURE);
   }
 
@@ -91,20 +86,23 @@ int main(int argc, char *argv[])
 
 void cleanup()
 {
-  if (handle)
-  {
-    pcap_close(handle);
-  }
+  pcap_set_rfmon(handle, 0);
+  pcap_close(handle);
 
-  if (errbuf)
+  if (errbuf != NULL)
   {
     free(errbuf);
   }
 
-  if (ap_list)
+  if (ap_list != NULL)
   {
     for (int i = 0; i < ap_list->size; i++)
     {
+      for (int j = 0; j < ap_list->data[i]->size; j++)
+      {
+        free(ap_list->data[i]->entries[j]);
+      }
+
       free(ap_list->data[i]);
     }
 
@@ -114,6 +112,11 @@ void cleanup()
 
 void main_loop(u_char *user, const struct pcap_pkthdr *h, const u_char *bytes)
 {
+  if (!((fc->type == IEEE80211_TYPE_MGMT && fc->subtype == IEEE80211_SUBTYPE_BEACON) || fc->type == IEEE80211_TYPE_DATA))
+  {
+    return;
+  }
+
   radiotap_header *rdiohdr = (radiotap_header *)(bytes);
 
   const uint8_t *frame_control_byte = bytes + rdiohdr->it_len;
@@ -153,11 +156,12 @@ void main_loop(u_char *user, const struct pcap_pkthdr *h, const u_char *bytes)
     }
   }
 
-  if (fc->type == 0 && fc->subtype == 0b1000)
+  if (fc->type == IEEE80211_TYPE_MGMT && fc->subtype == IEEE80211_SUBTYPE_BEACON)
   {
     beacon_frame_body *beacon_frame = (beacon_frame_body *)(bytes + rdiohdr->it_len + sizeof(mac_header));
 
     char ssid[33];
+    ssid[0] = '\0';
     memcpy(ssid, beacon_frame->ssid.ssid, beacon_frame->ssid.length);
     ssid[beacon_frame->ssid.length] = '\0';
 
@@ -177,54 +181,48 @@ void main_loop(u_char *user, const struct pcap_pkthdr *h, const u_char *bytes)
       com_ap_data *data = com_ap_data_new(bssid, ssid);
       com_ap_data_list_add(ap_list, data);
     }
-
-    return;
   }
 
-  if (!(fc->type == 0b10 && fc->subtype == 0b0000))
+  if (fc->type == IEEE80211_TYPE_DATA && !mac_is_broadcast(destination_address))
   {
-    return;
-  }
+    com_ap_data *current_ap = NULL;
 
-  if (mac_is_broadcast(destination_address))
-  {
-    return;
-  }
-
-  com_ap_data *current_ap = NULL;
-
-  for (int i = 0; i < ap_list->size; i++)
-  {
-    if (mac_equal(ap_list->data[i]->bssid, bssid))
+    for (int i = 0; i < ap_list->size; i++)
     {
-      current_ap = ap_list->data[i];
-      break;
+      if (mac_equal(ap_list->data[i]->bssid, bssid))
+      {
+        current_ap = ap_list->data[i];
+        break;
+      }
+    }
+
+    if (current_ap != NULL)
+    {
+      int found = 0;
+
+      for (int i = 0; i < current_ap->size; i++)
+      {
+        centry *entry = current_ap->entries[i];
+        if ((mac_equal(entry->addr_1, source_address) && mac_equal(entry->addr_2, destination_address)) || (mac_equal(entry->addr_2, source_address) && mac_equal(entry->addr_1, destination_address)))
+        {
+          entry->ttl = START_TTL;
+          found = 1;
+          break;
+        }
+      }
+
+      if (!found)
+      {
+        com_ap_data_add_entry(current_ap, source_address, destination_address, START_TTL);
+      }
     }
   }
 
-  if (current_ap == NULL)
-  {
-    return;
-  }
+  print_data();
+}
 
-  int found = 0;
-
-  for (int i = 0; i < current_ap->size; i++)
-  {
-    centry *entry = current_ap->entries[i];
-    if ((mac_equal(entry->addr_1, source_address) && mac_equal(entry->addr_2, destination_address)) || (mac_equal(entry->addr_2, source_address) && mac_equal(entry->addr_1, destination_address)))
-    {
-      entry->ttl = START_TTL;
-      found = 1;
-      break;
-    }
-  }
-
-  if (!found)
-  {
-    com_ap_data_add_entry(current_ap, source_address, destination_address, START_TTL);
-  }
-
+void print_data()
+{
   clear();
 
   for (int i = 0; i < ap_list->size; i++)
@@ -232,7 +230,7 @@ void main_loop(u_char *user, const struct pcap_pkthdr *h, const u_char *bytes)
     printf("BSSID: " GREEN MACSTR RESET " SSID: " YELLOW "%s" RESET "\n", MAC2STR(ap_list->data[i]->bssid), ap_list->data[i]->ssid);
     for (int j = 0; j < ap_list->data[i]->size; j++)
     {
-      printf("\t%d. "GREEN MACSTR RESET" <-> "GREEN MACSTR RESET"\n", j + 1, MAC2STR(ap_list->data[i]->entries[j]->addr_1), MAC2STR(ap_list->data[i]->entries[j]->addr_2));
+      printf("\t%d. " GREEN MACSTR RESET " <-> " GREEN MACSTR RESET "\n", j + 1, MAC2STR(ap_list->data[i]->entries[j]->addr_1), MAC2STR(ap_list->data[i]->entries[j]->addr_2));
       ap_list->data[i]->entries[j]->ttl--;
     }
 
