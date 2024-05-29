@@ -7,6 +7,7 @@
 #define IEEE80211_TYPE_DATA 0x2
 
 #define IEEE80211_SUBTYPE_BEACON 0x8
+#define IEEE80211_SUBTYPE_DATA 0x0
 
 typedef struct ieee80211_radiotap_header
 {
@@ -91,7 +92,7 @@ com_ap_data *com_ap_data_new(uint8_t *bssid, char *ssid)
   com_ap_data *data = malloc(sizeof(com_ap_data));
   data->entries = NULL;
   data->size = 0;
-  list->cap = 0;
+  data->cap = 0;
   memcpy(data->bssid, bssid, 6);
   strcpy(data->ssid, ssid);
   return data;
