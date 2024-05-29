@@ -15,7 +15,7 @@
 #include "hwutils.h"
 #include "printutils.h"
 
-char errbuf = NULL;
+char* errbuf;
 pcap_t *handle = NULL;
 com_ap_data_list *ap_list = NULL;
 
@@ -87,12 +87,12 @@ int main(int argc, char *argv[])
 void cleanup()
 {
   pcap_set_rfmon(handle, 0);
-  pcap_close(handle);
+  // pcap_close(handle);
 
-  if (errbuf != NULL)
-  {
+  // if (errbuf != NULL)
+  // {
     free(errbuf);
-  }
+  // }
 
   if (ap_list != NULL)
   {
@@ -112,17 +112,17 @@ void cleanup()
 
 void main_loop(u_char *user, const struct pcap_pkthdr *h, const u_char *bytes)
 {
-  if (!((fc->type == IEEE80211_TYPE_MGMT && fc->subtype == IEEE80211_SUBTYPE_BEACON) || fc->type == IEEE80211_TYPE_DATA))
-  {
-    return;
-  }
-
   radiotap_header *rdiohdr = (radiotap_header *)(bytes);
 
   const uint8_t *frame_control_byte = bytes + rdiohdr->it_len;
   frame_control *fc = (frame_control *)(frame_control_byte);
   mac_header *hdr = (mac_header *)(frame_control_byte);
 
+  if (!((fc->type == IEEE80211_TYPE_MGMT && fc->subtype == IEEE80211_SUBTYPE_BEACON) || (fc->type == IEEE80211_TYPE_DATA || fc->subtype == IEEE80211_SUBTYPE_DATA)))
+  {
+    return;
+  }
+ 
   uint8_t *source_address, *destination_address, *bssid;
 
   if (fc->to_ds == 0)
@@ -240,4 +240,8 @@ void print_data()
   }
 
   fflush(stdout);
+}
+
+void stop(int signo) {
+  exit(EXIT_SUCCESS);
 }
